@@ -3,11 +3,11 @@ name: Build EasyRoboCopy EXE
 on:
   push:
     branches: [ "main" ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
-  release:
-    types: [created]
 
 jobs:
   build:
@@ -34,12 +34,10 @@ jobs:
         name: EasyRoboV1
         path: EasyRoboV1.exe
         
-    - name: Upload to Release (if triggered by release)
-      if: github.event_name == 'release'
-      uses: svenstaro/upload-release-action@v2
+    - name: Publish GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
       with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: EasyRoboV1.exe
-        asset_name: EasyRoboV1.exe
-        tag: ${{ github.ref }}
-        overwrite: true
+        files: EasyRoboV1.exe
+        name: EasyRoboCopy ${{ github.ref_name }}
+        generate_release_notes: true
