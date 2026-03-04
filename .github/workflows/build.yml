@@ -1,0 +1,45 @@
+name: Build EasyRoboCopy EXE
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install PS2EXE Module
+      shell: powershell
+      run: |
+        Set-PSRepository PSGallery -InstallationPolicy Trusted
+        Install-Module PS2EXE -Scope CurrentUser -Force -AcceptLicense
+
+    - name: Compile to Executable
+      shell: powershell
+      run: |
+        Invoke-PS2EXE -InputFile "RoboCopyGUI_1.0.ps1" -OutputFile "EasyRoboV1.exe" -NoConsole -STA -IconFile "EasyRoboCopy.ico" -Title "EasyRoboCopy V1" -Description "RoboCopy GUI Tool by sanjay-m6"
+
+    - name: Upload EXE Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: EasyRoboV1
+        path: EasyRoboV1.exe
+        
+    - name: Upload to Release (if triggered by release)
+      if: github.event_name == 'release'
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: EasyRoboV1.exe
+        asset_name: EasyRoboV1.exe
+        tag: ${{ github.ref }}
+        overwrite: true
