@@ -19,6 +19,7 @@ if (-not $isCompiledExe -and -not $env:ROBOCOPY_GUI_HIDDEN -and $Host.Name -eq "
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName Microsoft.VisualBasic
+Add-Type -AssemblyName PresentationCore
 
 # ===============================
 # Save File
@@ -26,11 +27,24 @@ Add-Type -AssemblyName Microsoft.VisualBasic
 $configFile = "$env:APPDATA\RoboCopyProfiles.csv"
 if (!(Test-Path $configFile)) { "" | Out-File $configFile }
 
+$global:settingsFile = "$env:APPDATA\RoboCopySettings.ini"
+$global:startMinimized = $false
+$global:notifyOnComplete = $true
+if (Test-Path $global:settingsFile) {
+    try {
+        $c = (Get-Content $global:settingsFile) -join ""
+        if ($c -match "StartMinimized=1") { $global:startMinimized = $true }
+        if ($c -match "NotifyOnComplete=0") { $global:notifyOnComplete = $false }
+    }
+    catch {}
+}
+
 # ===============================
 # GLOBAL PROCESS CONTROL
 # ===============================
 $global:RobocopyProcess = $null
 $global:StopRequested = $false
+$global:AlertSoundPath = $null
 
 # ===============================
 # Modern Explorer Picker
@@ -70,6 +84,7 @@ try {
     }
 
     $iconPath = Join-Path $scriptDir "EasyRoboCopy.ico"
+    $global:AlertSoundPath = Join-Path $scriptDir "alert.mp3"
 
     if (Test-Path $iconPath) {
 
@@ -81,12 +96,20 @@ try {
 
 }
 catch {}
-$form.Text = "EasyRoboCopy"
+$form.Text = "EasyRoboCopy by CjHackerYT"
 $form.Size = "1050,750"
 $form.MinimumSize = "1000,700"
 $form.StartPosition = "CenterScreen"
 $form.KeyPreview = $true
 $form.AllowDrop = $true
+
+$form.Add_Load({
+        if ($global:startMinimized) {
+            $form.WindowState = [System.Windows.Forms.FormWindowState]::Minimized
+            $form.Hide()
+            $trayIcon.Visible = $true
+        }
+    })
 
 # Modern UI - Colors & Fonts
 $form.BackColor = [System.Drawing.ColorTranslator]::FromHtml("#F4F7F6")
@@ -113,6 +136,36 @@ $headerLbl.Font = $global:headerFont
 $headerLbl.Location = "30, 20"
 $headerLbl.AutoSize = $true
 $mainPanel.Controls.Add($headerLbl)
+
+$chkRunMinimized = New-Object Windows.Forms.CheckBox
+$chkRunMinimized.Text = "Run Minimized"
+$chkRunMinimized.Location = "850,25"
+$chkRunMinimized.AutoSize = $true
+$chkRunMinimized.Font = $global:uiFont
+$chkRunMinimized.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#7A8B9A")
+$chkRunMinimized.Anchor = "Top, Right"
+$chkRunMinimized.Checked = $global:startMinimized
+$mainPanel.Controls.Add($chkRunMinimized)
+$chkRunMinimized.Add_CheckedChanged({
+        $sm = if ($chkRunMinimized.Checked) { 1 } else { 0 }
+        $nc = if ($chkNotify.Checked) { 1 } else { 0 }
+        "StartMinimized=$sm`r`nNotifyOnComplete=$nc" | Out-File $global:settingsFile
+    })
+
+$chkNotify = New-Object Windows.Forms.CheckBox
+$chkNotify.Text = "Notifications"
+$chkNotify.Location = "720,25"
+$chkNotify.AutoSize = $true
+$chkNotify.Font = $global:uiFont
+$chkNotify.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#7A8B9A")
+$chkNotify.Anchor = "Top, Right"
+$chkNotify.Checked = $global:notifyOnComplete
+$mainPanel.Controls.Add($chkNotify)
+$chkNotify.Add_CheckedChanged({
+        $sm = if ($chkRunMinimized.Checked) { 1 } else { 0 }
+        $nc = if ($chkNotify.Checked) { 1 } else { 0 }
+        "StartMinimized=$sm`r`nNotifyOnComplete=$nc" | Out-File $global:settingsFile
+    })
 
 # ===============================
 # TRAY ICON SETUP
@@ -273,7 +326,7 @@ $srcBrowse.Add_Click({
 $destLbl = New-Object Windows.Forms.Label
 $destLbl.Text = "Destination Path"
 $destLbl.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$destLbl.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#7A8B9A")
+$destLbl.ForeColor = [System.Drawing.ColorTranslator]::FromHtml("#0d8effff")
 $destLbl.Location = "20,115"
 $destLbl.AutoSize = $true
 $taskCard.Controls.Add($destLbl)
@@ -641,9 +694,37 @@ $addBtn.Add_Click({
 
 # REMOVE
 $removeBtn.Add_Click({
-        foreach ($i in $listView.SelectedItems) { $listView.Items.Remove($i) }
+        $toRemove = @($listView.CheckedItems)
+        foreach ($i in $toRemove) { $listView.Items.Remove($i) }
         Save-Profiles
     })
+
+# ===============================
+# COMPLETION ALERT SOUND
+# ===============================
+function Invoke-CompletionAlert {
+    param([bool]$Success = $true)
+    
+    if ($chkNotify.Checked) {
+        $trayIcon.Visible = $true
+        if ($Success) {
+            $trayIcon.ShowBalloonTip(3000, "EasyRoboCopy", "Task(s) Completed Successfully!", [System.Windows.Forms.ToolTipIcon]::Info)
+        }
+        else {
+            $trayIcon.ShowBalloonTip(3000, "EasyRoboCopy", "Task(s) Completed with Errors!", [System.Windows.Forms.ToolTipIcon]::Error)
+        }
+    }
+
+    if ($Success) {
+        if (-not $global:AlertSoundPath -or -not (Test-Path $global:AlertSoundPath)) { return }
+        try {
+            $player = New-Object System.Windows.Media.MediaPlayer
+            $player.Open([Uri]::new($global:AlertSoundPath))
+            $player.Play()
+        }
+        catch {}
+    }
+}
 
 # ===============================
 # ROBOCOPY ENGINE (NON-BLOCKING)
@@ -652,6 +733,7 @@ function Start-RobocopyJob($source, $dest) {
 
     $global:StopRequested = $false
     $progressBar.Value = 0
+    $jobSuccess = $true
 
     $opts = ""
     if ($chkE.Checked) { $opts += " /E" }
@@ -661,7 +743,7 @@ function Start-RobocopyJob($source, $dest) {
     $sources = $source -split '\|'
 
     foreach ($s in $sources) {
-        if ($global:StopRequested) { break }
+        if ($global:StopRequested) { $jobSuccess = $false; break }
 
         if (Test-Path $s -PathType Leaf) {
             $srcDir = Split-Path $s
@@ -683,7 +765,7 @@ function Start-RobocopyJob($source, $dest) {
 
         while (-not $proc.HasExited) {
 
-            if ($global:StopRequested) { break }
+            if ($global:StopRequested) { $jobSuccess = $false; break }
 
             if (!$proc.StandardOutput.EndOfStream) {
                 $line = $proc.StandardOutput.ReadLine()
@@ -697,7 +779,15 @@ function Start-RobocopyJob($source, $dest) {
 
             [System.Windows.Forms.Application]::DoEvents()
         }
+
+        # Robocopy exit codes: 0-7 = success, 8+ = failure
+        if (-not $global:StopRequested) {
+            $proc.WaitForExit()
+            if ($proc.ExitCode -ge 8) { $jobSuccess = $false }
+        }
     }
+
+    return $jobSuccess
 }
 
 # ===============================
@@ -706,16 +796,19 @@ function Start-RobocopyJob($source, $dest) {
 $copyBtn.Add_Click({
 
         $checked = $listView.CheckedItems
+        $allSuccess = $true
 
         if ($checked.Count -gt 0) {
             foreach ($row in $checked) {
-                Start-RobocopyJob $row.SubItems[1].Text $row.SubItems[2].Text
+                $result = Start-RobocopyJob $row.SubItems[1].Text $row.SubItems[2].Text
+                if (-not $result) { $allSuccess = $false }
             }
         }
         else {
-            Start-RobocopyJob $srcBox.Text $destBox.Text
+            $allSuccess = Start-RobocopyJob $srcBox.Text $destBox.Text
         }
 
+        Invoke-CompletionAlert -Success $allSuccess
     })
 
 # ===============================
@@ -782,7 +875,8 @@ $hotkeyTimer.Add_Tick({
 
                 $global:LastHotkeyTime = $now
 
-                Start-RobocopyJob $row.SubItems[1].Text $row.SubItems[2].Text
+                $result = Start-RobocopyJob $row.SubItems[1].Text $row.SubItems[2].Text
+                Invoke-CompletionAlert -Success $result
                 break
             }
         }
