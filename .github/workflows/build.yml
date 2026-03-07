@@ -1,0 +1,38 @@
+name: Build and Release EasyRoboCopy
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger build when pushing tags like v1.0.1
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    # Needs permissions to create a release in the repository
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install PS2EXE
+        shell: powershell
+        run: |
+          Install-Module -Name PS2EXE -Force -Scope CurrentUser -AcceptLicense
+
+      - name: Compile Executable
+        shell: powershell
+        run: |
+          Invoke-PS2EXE -InputFile "RoboCopyGUI_1.0.ps1" -OutputFile "EasyRoboCopy.exe" -NoConsole -STA -IconFile "icon.ico" -Title "EasyRoboCopy" -Description "RoboCopy GUI Tool"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: EasyRoboCopy.exe
+          name: EasyRoboCopy Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
